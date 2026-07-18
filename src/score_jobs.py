@@ -2,7 +2,6 @@ import json
 import time
 from pathlib import Path
 from groq import Groq
-from database import connect
 
 # 1. Paste the keys from your different Groq accounts here
 API_KEYS = [
@@ -20,6 +19,8 @@ client = Groq(api_key=API_KEYS[current_key_index])
 ROOT = Path(__file__).resolve().parents[1]
 FACTS_PATH = ROOT / "resume" / "facts.json"
 MASTER_RESUME_PATH = ROOT / "resume" / "master.md"
+JOBS_JSON_PATH = ROOT / "jobs.json"
+OUTPUT_PATH = ROOT / "data" / "scored_jobs.json"
 
 def load_source_material():
     with open(FACTS_PATH, "r", encoding="utf-8") as f:
@@ -27,6 +28,13 @@ def load_source_material():
     with open(MASTER_RESUME_PATH, "r", encoding="utf-8") as f:
         resume = f.read()
     return facts, resume
+
+def load_scraped_jobs():
+    if not JOBS_JSON_PATH.exists():
+        print(f"⚠️ Error: {JOBS_JSON_PATH} not found. Run scraper.py first!")
+        return []
+    with open(JOBS_JSON_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 def score_job_with_ai(job, facts_json, master_resume):
     global current_key_index, client
@@ -51,9 +59,9 @@ MASTER RESUME:
 {master_resume}
 
 JOB:
-Title: {job['title']}
-Company: {job['company']}
-Description: {job['description']}
+Title: {job.get('title', 'N/A')}
+Company: {job.get('company', 'N/A')}
+Description: {job.get('description', 'N/A')}
 """
     
     max_retries = len(API_KEYS)
@@ -63,7 +71,7 @@ Description: {job['description']}
         try:
             chat_completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile", # Change to "llama-3.1-8b-instant" if you prefer Option 1
+                model="llama-3.3-70b-versatile",
                 temperature=0.1
             )
             output = chat_completion.choices[0].message.content.strip()
@@ -77,7 +85,6 @@ Description: {job['description']}
             
         except Exception as e:
             error_msg = str(e).lower()
-            # If we hit the rate limit, trigger the automatic key rotation
             if "429" in error_msg or "rate limit" in error_msg:
                 print(f"\n⚠️ Account {current_key_index + 1} exhausted its free tokens.")
                 current_key_index += 1
@@ -87,51 +94,82 @@ Description: {job['description']}
                     client = Groq(api_key=API_KEYS[current_key_index])
                     attempts += 1
                     time.sleep(2)
-                    continue # Retry the exact same job with the new key
+                    continue 
                 else:
                     print("❌ All provided API keys have been exhausted for today!")
-                    return None
+                    return "RATE_LIMIT_EXHAUSTED"
             else:
-                print(f"Failed to score job {job['id']} due to error: {e}")
+                job_title = job.get('title', 'Unknown Job')
+                print(f"Failed to score job '{job_title}' due to error: {e}")
                 return None
 
 def main():
-    facts_json, master_resume = load_source_material()
-    connection = connect()
+    facts, resume = load_source_material()
+    all_scraped_jobs = load_scraped_jobs()
     
-    # 2. Increased the batch limit to 100 jobs per run
-    cursor = connection.execute("SELECT * FROM jobs WHERE status = 'ready_for_scoring' LIMIT 100")
-    jobs_to_score = cursor.fetchall()
-    
-    print(f"Found {len(jobs_to_score)} jobs. Starting batch processing...")
-    
-    for job in jobs_to_score:
-        job_dict = dict(job)
-        print(f"Scoring: {job_dict['title']} at {job_dict['company']}...")
+    if not all_scraped_jobs:
+        return
         
-        result = score_job_with_ai(job_dict, facts_json, master_resume)
-        
-        # 3. Added a pacing delay so you don't overwhelm the Groq servers
-        time.sleep(2.5) 
-        
-        if result:
-            connection.execute(
-                """
-                UPDATE jobs 
-                SET status = ?, score = ?, notes = ? 
-                WHERE id = ?
-                """,
-                (
-                    result.get("decision", "review"),
-                    result.get("score", 0),
-                    json.dumps(result, ensure_ascii=False),
-                    job_dict['id']
-                )
-            )
+    # 1. Load previously scored jobs to build a memory of what's already done
+    existing_scored_jobs = []
+    scored_urls = set()
     
-    connection.commit()
-    connection.close()
-    print("AI scoring loop finished.")
+    if OUTPUT_PATH.exists():
+        with open(OUTPUT_PATH, "r", encoding="utf-8") as f:
+            try:
+                existing_scored_jobs = json.load(f)
+                scored_urls = {job.get("url") for job in existing_scored_jobs if job.get("url")}
+            except json.JSONDecodeError:
+                pass # File is empty or corrupted, start fresh
+
+    # 2. Filter the raw scrape list to ONLY include jobs we haven't scored yet
+    unscored_jobs = [job for job in all_scraped_jobs if job.get("url") not in scored_urls]
+    
+    if not unscored_jobs:
+        print("✅ All scraped jobs have already been scored. Run your scraper to find more!")
+        return
+        
+    # 3. Apply the Batch Limit (120 Jobs)
+    BATCH_LIMIT = 120
+    jobs_to_score = unscored_jobs[:BATCH_LIMIT]
+    
+    print(f"📊 Found {len(unscored_jobs)} unscored jobs in queue.")
+    print(f"🚀 Processing a batch of {len(jobs_to_score)} to protect API rate limits...")
+    
+    newly_scored_results = []
+    for index, job in enumerate(jobs_to_score):
+        print(f"[{index + 1}/{len(jobs_to_score)}] Scoring: {job.get('title')} at {job.get('company')}...")
+        
+        if 'description' not in job:
+            job['description'] = f"{job.get('title')} position at {job.get('company')}. Location: {job.get('location')}."
+            
+        try:
+            ai_score = score_job_with_ai(job, facts, resume)
+            
+            if ai_score == "RATE_LIMIT_EXHAUSTED":
+                print("\n🛑 Halting batch processing to save progress before keys reset.")
+                break
+                
+            if ai_score:
+                job['ai_analysis'] = ai_score
+                newly_scored_results.append(job)
+            
+            time.sleep(2.5) 
+        except Exception as e:
+            print(f"Skipping role due to critical processing error: {e}")
+            continue
+
+    # 4. Append the new results to the existing ones and save
+    existing_scored_jobs.extend(newly_scored_results)
+    
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(existing_scored_jobs, f, indent=4, ensure_ascii=False)
+        
+    print(f"\n🎉 Successfully processed {len(newly_scored_results)} roles! Saved output to {OUTPUT_PATH}")
+    if len(unscored_jobs) > BATCH_LIMIT:
+        remaining = len(unscored_jobs) - len(newly_scored_results)
+        print(f"⏳ {remaining} jobs remain in the queue. Run this script again tomorrow (or when your keys reset) to continue.")
 
 if __name__ == "__main__":
     main()

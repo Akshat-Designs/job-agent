@@ -1,57 +1,51 @@
 import json
 from pathlib import Path
-from database import connect
 
+# Setup paths
 ROOT = Path(__file__).resolve().parents[1]
-FACTS_PATH = ROOT / "resume" / "facts.json"
-
-def load_preferences():
-    with open(FACTS_PATH, "r", encoding="utf-8") as file:
-        data = json.load(file)
-        return data.get("preferences", {})
-
-def basic_decision(job, preferences):
-    # Combine title and description for a fast keyword search
-    text = f"{job['title']} {job['description']}".lower()
-    
-    # Check if the job title matches any of our targets
-    targets = [x.lower() for x in preferences.get('target_titles', [])]
-    if not any(target in job['title'].lower() for target in targets):
-        return "rejected_title"
-        
-    # Check for excluded red-flag keywords
-    excluded = preferences.get('excluded_keywords', [])
-    if any(word.lower() in text for word in excluded):
-        return "rejected_keyword"
-        
-    # If it passes the fast filters, it goes to the AI
-    return "ready_for_scoring"
+SCORED_JOBS_PATH = ROOT / "data" / "scored_jobs.json"
+TO_APPLY_PATH = ROOT / "data" / "to_apply.json"
 
 def main():
-    preferences = load_preferences()
-    connection = connect()
+    if not SCORED_JOBS_PATH.exists():
+        print(f"⚠️ Error: {SCORED_JOBS_PATH} not found. Please run score_jobs.py first.")
+        return
+
+    with open(SCORED_JOBS_PATH, "r", encoding="utf-8") as file:
+        scored_jobs = json.load(file)
     
-    # Get all jobs that haven't been filtered yet
-    cursor = connection.execute("SELECT * FROM jobs WHERE status = 'new'")
-    new_jobs = cursor.fetchall()
-    
-    processed_count = 0
-    for job in new_jobs:
-        # Convert sqlite3.Row to a standard dictionary
-        job_dict = dict(job)
-        decision = basic_decision(job_dict, preferences)
+    print(f"Found {len(scored_jobs)} scored jobs. Applying strict >= 75 filter and checking redundancies...")
+
+    top_tier_jobs = []
+    seen_urls = set()
+
+    for job in scored_jobs:
+        # Safely extract the score from the ai_analysis block
+        ai_analysis = job.get("ai_analysis", {})
         
-        # Update the database with the new status
-        connection.execute(
-            "UPDATE jobs SET status = ? WHERE id = ?", 
-            (decision, job['id'])
-        )
-        processed_count += 1
-        
-    connection.commit()
-    connection.close()
-    
-    print(f"Applied basic filters to {processed_count} new jobs.")
+        try:
+            score = int(ai_analysis.get("score", 0))
+        except (ValueError, TypeError):
+            score = 0
+            
+        url = job.get("url", "")
+
+        # Strict filter: Must be 75 or higher, and must not be a duplicate URL
+        if score >= 75 and url not in seen_urls:
+            top_tier_jobs.append(job)
+            seen_urls.add(url)
+            
+    # Sort the final list by score descending (so the 95s and 90s are at the top)
+    top_tier_jobs.sort(key=lambda x: int(x.get("ai_analysis", {}).get("score", 0)), reverse=True)
+
+    # Save the polished shortlist
+    TO_APPLY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TO_APPLY_PATH, "w", encoding="utf-8") as file:
+        json.dump(top_tier_jobs, file, indent=4, ensure_ascii=False)
+
+    print(f"✅ Filtering complete! Eliminated {len(scored_jobs) - len(top_tier_jobs)} low-match or duplicate roles.")
+    print(f"🎯 Secured {len(top_tier_jobs)} highly qualified jobs (Score 75+).")
+    print(f"📁 Shortlist saved to {TO_APPLY_PATH}")
 
 if __name__ == "__main__":
     main()

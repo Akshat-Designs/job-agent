@@ -31,7 +31,7 @@ def main():
     print("Starting Job Agent Daily Run...")
     
     # 1. Collect public jobs
-    run_script("collect_greenhouse.py")
+    run_script("scraper.py")
     
     # 2. Import to SQLite and deduplicate
     run_script("import_jobs.py")
