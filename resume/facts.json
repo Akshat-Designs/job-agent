@@ -1,0 +1,58 @@
+{
+  "identity": {
+    "name": "Akshat Singh",
+    "email": "hello.akshatsingh@gmail.com",
+    "phone": "+91 82993 78419",
+    "location": "New Delhi, India",
+    "work_authorization": "India",
+    "linkedin": "https://www.linkedin.com/in/akshat-singh-77398736b/",
+    "portfolio": "https://akshatsinghcv.lovable.app/"
+  },
+  "preferences": {
+    "target_titles": [
+      "Intern",
+      "Analyst",
+      "Strategy",
+      "Finance",
+      "Growth",
+      "Marketing"
+  
+    ],
+    "locations": ["Remote", "New Delhi"],
+    "minimum_experience_level": "internship",
+    "maximum_experience_level": "entry",
+    "excluded_keywords": ["unpaid", "commission only"]
+  },
+  "verified_skills": [
+    "Advanced MS Excel",
+    "Power BI",
+    "SQL",
+    "MySQL",
+    "Python",
+    "DCF Modelling",
+    "Corporate Valuation",
+    "Database Management",
+    "Market Research",
+    "Competitor Analysis",
+    "Go-To-Market Strategy"
+  ],
+  "verified_achievements": [
+    "Converted 50+ cold-contacted prospects into committed institutional partners for HRDC.",
+    "Delivered a 200+ participant flagship symposium (Minductor 14.0) with zero operational escalations.",
+    "Secured Sony as a marquee corporate sponsor.",
+    "Ensured 100% data integrity across 400+ entries as Head of DBMS for Techno Fair.",
+    "Built a 10-year DCF model for Zomato deriving an intrinsic value of ₹56.63/share.",
+    "Distilled 8 technology sectors into decision-ready briefs for the CMS Industry Primer.",
+    "Produced a 10-page risk-mitigation framework on the AI market.",
+    "Identified 5+ strategic divergence points between Apple and Samsung using Porter's Five Forces and BCG Matrix.",
+    "Scored 96% on the SEBI NISM Certification."
+  ],
+  "prohibited_claims": [
+    "Do not claim skills, employers, dates, certifications, or metrics not in master.md.",
+    "Do not invent contact information."
+  ],
+  "system_instructions": {
+    "generate_cover_letter": true,
+    "cover_letter_source": "resume/cover_letter_template.md"
+  }
+}
